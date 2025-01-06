@@ -74,6 +74,7 @@ W1 = torch.randn((n_embeddings * block_size, n_hidden), generator=g) * 0.01 # (3
 b1 = torch.randn(n_hidden, generator=g) * 0.1 # (200)
 W2 = torch.randn((n_hidden, vocab_size), generator=g) * 0.01 # (200, 27)
 b2 = torch.randn(vocab_size, generator=g) * 0.1 # (27)
+
 # %%
 parameters = [embedding_matrix, W1, b1, W2, b2]
 print(sum(p.nelement() for p in parameters)) # number of parameters in total
@@ -240,6 +241,16 @@ for _ in range(20):
 # plt.hist(x.view(-1).tolist(), 50, density=True)
 # plt.subplot(122)
 # plt.hist(y.view(-1).tolist(), 50, density=True)
+
+# %%
+# batch normalization gain & loss
+bngain = torch.ones((1, n_hidden))
+bnbias = torch.zeros((1, n_hidden))
+
+parameters = [embedding_matrix, W1, b1, W2, b2, bngain, bnbias]
+print(sum(p.nelement() for p in parameters)) # number of parameters in total
+for p in parameters:
+    p.requires_grad = True
 # %%
 # Batch Normalization (refer to discussion line:172 - dealing with gradient vanish and neuron saturation (highly activated))
 max_steps = 200000
@@ -264,10 +275,26 @@ for i in range(max_steps):
     # embedding_mapping.view(embedding_mapping.shape[0], embedding_mapping.shape[1] * embedding_mapping.shape[2])
     embedding_concat = embedding_mapping.view(embedding_mapping.shape[0], -1) 
     hidden_layer_pre_activation = embedding_concat @ W1 + b1
-    hidden_layer_pre_activation = (hidden_layer_pre_activation - hidden_layer_pre_activation.mean(0, keepdim=True)) / hidden_layer_pre_activation.std(0, keepdim=True) 
+    hidden_layer_pre_activation = bngain * (hidden_layer_pre_activation - hidden_layer_pre_activation.mean(0, keepdim=True)) / hidden_layer_pre_activation.std(0, keepdim=True) + bnbias
     hidden_layer = torch.tanh(hidden_layer_pre_activation) # hidden layer
     logits = hidden_layer @ W2 + b2 # output layer
     loss = F.cross_entropy(logits, Ybatch)
+
+    # backward pass
+    for p in parameters:
+        p.grad = None
+    loss.backward()
+
+    # update
+    learning_rate = 0.1 if i < 100000 else 0.01
+    for p in parameters:
+        p.data += -learning_rate * p.grad
+    
+    # track stats
+    if i % 10000 == 0:
+        print(f"{i:7d}/{max_steps:7d}: {loss.item():.4f}")
+    track_loss.append(loss.log10().item())
+
 # %%
 '''
 Custom functions: mean, std (refer to line:267)
