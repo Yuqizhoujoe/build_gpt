@@ -177,6 +177,15 @@ plt.imshow(hidden_layer.abs() > 0.99, cmap='gray', interpolation='nearest')
 # %%
 plt.plot(track_loss)
 # %%
+with torch.no_grad():
+    # pass the training set through
+    embedding_mapping = embedding_matrix[Xtrain]
+    embedding_concat = embedding_mapping.view(embedding_mapping.shape[0], -1)
+    hidden_layer_preact = embedding_concat @ W1 + b1
+    # measure the mean/std over the entire training set
+    bnmean = hidden_layer_preact.mean(0, keepdim=True)
+    bnstd = hidden_layer_preact.std(0, keepdim=True)
+# %%
 @torch.no_grad() # this decorator disables gradient tracking
 def split_loss(split):
     x, y = {
@@ -246,6 +255,8 @@ for _ in range(20):
 # batch normalization gain & loss
 bngain = torch.ones((1, n_hidden))
 bnbias = torch.zeros((1, n_hidden))
+bnmean_running = torch.zeros((1, n_hidden))
+bnstd_running = torch.ones((1, n_hidden))
 
 parameters = [embedding_matrix, W1, b1, W2, b2, bngain, bnbias]
 print(sum(p.nelement() for p in parameters)) # number of parameters in total
@@ -275,8 +286,18 @@ for i in range(max_steps):
     # embedding_mapping.view(embedding_mapping.shape[0], embedding_mapping.shape[1] * embedding_mapping.shape[2])
     embedding_concat = embedding_mapping.view(embedding_mapping.shape[0], -1) 
     hidden_layer_pre_activation = embedding_concat @ W1 + b1
-    hidden_layer_pre_activation = bngain * (hidden_layer_pre_activation - hidden_layer_pre_activation.mean(0, keepdim=True)) / hidden_layer_pre_activation.std(0, keepdim=True) + bnbias
+
+    bnmeani = hidden_layer_pre_activation.mean(0, keepdim=True)
+    bnstdi = hidden_layer_pre_activation.std(0, keepdim=True)
+
+    hidden_layer_pre_activation = bngain * (hidden_layer_pre_activation - bnmeani) / bnstdi + bnbias
+
+    with torch.no_grad():
+        bnmean_running = 0.999 * bnmean_running + 0.001 * bnmeani
+        bnstd_running = 0.999 * bnstd_running + 0.001 * bnstdi
+
     hidden_layer = torch.tanh(hidden_layer_pre_activation) # hidden layer
+
     logits = hidden_layer @ W2 + b2 # output layer
     loss = F.cross_entropy(logits, Ybatch)
 
