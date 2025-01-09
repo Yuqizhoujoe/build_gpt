@@ -2,6 +2,7 @@
 ## makemore: part 3
 # %%
 import torch
+import numpy as np
 import random
 import torch.nn.functional as F
 import matplotlib.pyplot as plt 
@@ -67,16 +68,13 @@ n_hidden = 200 # the number of neurons in the hidden layer of the MLP
 
 g = torch.Generator().manual_seed(2147483647) # for reproducbility
 embedding_matrix = torch.randn((vocab_size, n_embeddings), generator=g) # (27, 10)
-for index, char_embedding in enumerate(embedding_matrix):
-    char = index_to_char[index]
-    print(f"char '{char}' correspond to embedding vector: {char_embedding}")
 W1 = torch.randn((n_embeddings * block_size, n_hidden), generator=g) * 0.01 # (30, 200)
 b1 = torch.randn(n_hidden, generator=g) * 0.1 # (200)
 W2 = torch.randn((n_hidden, vocab_size), generator=g) * 0.01 # (200, 27)
 b2 = torch.randn(vocab_size, generator=g) * 0.1 # (27)
 
 # %%
-parameters = [embedding_matrix, W1, b1, W2, b2]
+parameters = [embedding_matrix, W1, W2, b2]
 print(sum(p.nelement() for p in parameters)) # number of parameters in total
 for p in parameters:
     p.requires_grad = True
@@ -126,6 +124,7 @@ for i in range(max_steps):
         print(f"{i:7d}/{max_steps:7d}: {loss.item(): 4f}")
     
     track_loss.append(loss.log10().item())
+    break
 # %%
 '''
 concat 2D tensor (32, 200) into 1D tensor (6400)
@@ -176,6 +175,91 @@ plt.figure(figsize=(20,10))
 plt.imshow(hidden_layer.abs() > 0.99, cmap='gray', interpolation='nearest')
 # %%
 plt.plot(track_loss)
+
+# %% [markdown]
+## Batch Normalization
+# %%
+# MLP revisited
+n_embeddings = 10 # the dimenionality of the character embedding vectors
+n_hidden = 200 # the number of neurons in the hidden layer of the MLP
+
+g = torch.Generator().manual_seed(2147483647) # for reproducbility
+embedding_matrix = torch.randn((vocab_size, n_embeddings), generator=g) # (27, 10)
+W1 = torch.randn((n_embeddings * block_size, n_hidden), generator=g) * 0.01 # (30, 200)
+W2 = torch.randn((n_hidden, vocab_size), generator=g) * 0.01 # (200, 27)
+b2 = torch.randn(vocab_size, generator=g) * 0.1 # (27)
+
+# batch normalization parameters
+bngain = torch.ones((1, n_hidden))
+bnbias = torch.zeros((1, n_hidden))
+bnmean_running = torch.zeros((1, n_hidden))
+bnstd_running = torch.ones((1, n_hidden))
+
+parameters = [embedding_matrix, W1, W2, b2, bngain, bnbias]
+print(sum(p.nelement() for p in parameters)) # number of parameters in total
+for p in parameters:
+    p.requires_grad = True
+# %%
+# Batch Normalization (refer to discussion line:172 - dealing with gradient vanish and neuron saturation (highly activated))
+max_steps = 200000
+batch_size = 32
+track_loss = []
+
+for i in range(max_steps):
+
+    # minibatch
+    indices = torch.randint(0, Xtrain.shape[0], (batch_size, ), generator=g)
+    Xbatch, Ybatch = Xtrain[indices], Ytrain[indices]
+
+    # forward pass
+    # embed the characters into vectors - indexing operation
+    '''
+    embedding_matrix is a tensor where each row corresponds to an embedding vector for a character in your vocabulary.
+    Xbatch is a tensor containing indices that correspond to characters in your vocabulary.
+    By using embedding_matrix[Xbatch], you are effectively using the indices in Xbatch to select the corresponding rows (embedding vectors) from embedding_matrix.
+    '''
+    embedding_mapping = embedding_matrix[Xbatch] 
+    # concatenate the vectors from (batch_size, block_size, n_embeddings) to (batch_size, block_size * n_embeddings)
+    # embedding_mapping.view(embedding_mapping.shape[0], embedding_mapping.shape[1] * embedding_mapping.shape[2])
+    embedding_concat = embedding_mapping.view(embedding_mapping.shape[0], -1) 
+
+    # Linear layer
+    hidden_layer_pre_activation = embedding_concat @ W1 # + b1
+
+    # Batch Normalization layer
+    # --------------------------------
+    # normalize: output=(input-mean)/std
+    bnmeani = hidden_layer_pre_activation.mean(0, keepdim=True)
+    bnstdi = hidden_layer_pre_activation.std(0, keepdim=True)
+    normalized_input = (hidden_layer_pre_activation - bnmeani) / bnstdi
+    # scale and shift: output=γ×normalized_input+β
+    hidden_layer_pre_activation = bngain * normalized_input + bnbias
+
+    with torch.no_grad():
+        bnmean_running = 0.999 * bnmean_running + 0.001 * bnmeani
+        bnstd_running = 0.999 * bnstd_running + 0.001 * bnstdi
+    # --------------------------------
+
+    # Non-linear activation
+    hidden_layer = torch.tanh(hidden_layer_pre_activation) # hidden layer
+    logits = hidden_layer @ W2 + b2 # output layer
+    loss = F.cross_entropy(logits, Ybatch) # loss function
+
+    # backward pass
+    for p in parameters:
+        p.grad = None
+    loss.backward()
+
+    # update
+    learning_rate = 0.1 if i < 100000 else 0.01
+    for p in parameters:
+        p.data += -learning_rate * p.grad
+    
+    # track stats
+    if i % 10000 == 0:
+        print(f"{i:7d}/{max_steps:7d}: {loss.item():.4f}")
+    track_loss.append(loss.log10().item())
+
 # %%
 with torch.no_grad():
     # pass the training set through
@@ -250,71 +334,6 @@ for _ in range(20):
 # plt.hist(x.view(-1).tolist(), 50, density=True)
 # plt.subplot(122)
 # plt.hist(y.view(-1).tolist(), 50, density=True)
-
-# %%
-# batch normalization gain & loss
-bngain = torch.ones((1, n_hidden))
-bnbias = torch.zeros((1, n_hidden))
-bnmean_running = torch.zeros((1, n_hidden))
-bnstd_running = torch.ones((1, n_hidden))
-
-parameters = [embedding_matrix, W1, b1, W2, b2, bngain, bnbias]
-print(sum(p.nelement() for p in parameters)) # number of parameters in total
-for p in parameters:
-    p.requires_grad = True
-# %%
-# Batch Normalization (refer to discussion line:172 - dealing with gradient vanish and neuron saturation (highly activated))
-max_steps = 200000
-batch_size = 32
-track_loss = []
-
-for i in range(max_steps):
-
-    # minibatch
-    indices = torch.randint(0, Xtrain.shape[0], (batch_size, ), generator=g)
-    Xbatch, Ybatch = Xtrain[indices], Ytrain[indices]
-
-    # forward pass
-    # embed the characters into vectors - indexing operation
-    '''
-    embedding_matrix is a tensor where each row corresponds to an embedding vector for a character in your vocabulary.
-    Xbatch is a tensor containing indices that correspond to characters in your vocabulary.
-    By using embedding_matrix[Xbatch], you are effectively using the indices in Xbatch to select the corresponding rows (embedding vectors) from embedding_matrix.
-    '''
-    embedding_mapping = embedding_matrix[Xbatch] 
-    # concatenate the vectors from (batch_size, block_size, n_embeddings) to (batch_size, block_size * n_embeddings)
-    # embedding_mapping.view(embedding_mapping.shape[0], embedding_mapping.shape[1] * embedding_mapping.shape[2])
-    embedding_concat = embedding_mapping.view(embedding_mapping.shape[0], -1) 
-    hidden_layer_pre_activation = embedding_concat @ W1 + b1
-
-    bnmeani = hidden_layer_pre_activation.mean(0, keepdim=True)
-    bnstdi = hidden_layer_pre_activation.std(0, keepdim=True)
-
-    hidden_layer_pre_activation = bngain * (hidden_layer_pre_activation - bnmeani) / bnstdi + bnbias
-
-    with torch.no_grad():
-        bnmean_running = 0.999 * bnmean_running + 0.001 * bnmeani
-        bnstd_running = 0.999 * bnstd_running + 0.001 * bnstdi
-
-    hidden_layer = torch.tanh(hidden_layer_pre_activation) # hidden layer
-
-    logits = hidden_layer @ W2 + b2 # output layer
-    loss = F.cross_entropy(logits, Ybatch)
-
-    # backward pass
-    for p in parameters:
-        p.grad = None
-    loss.backward()
-
-    # update
-    learning_rate = 0.1 if i < 100000 else 0.01
-    for p in parameters:
-        p.data += -learning_rate * p.grad
-    
-    # track stats
-    if i % 10000 == 0:
-        print(f"{i:7d}/{max_steps:7d}: {loss.item():.4f}")
-    track_loss.append(loss.log10().item())
 
 # %%
 '''
