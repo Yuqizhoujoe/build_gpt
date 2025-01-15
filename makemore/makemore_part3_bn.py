@@ -208,7 +208,7 @@ before tanh (activate), hidden_layer_pre_activation has extreme large number
 plt.hist(hidden_layer_pre_activation.view(-1).tolist(), 50)
 after tanh(x), those large number would get very close to 1 or -1 (also mean saturated) (check tanh graph) -> highly activated
 
-https://chatgpt.com/c/677acf8a-3ac4-8004-8af5-166ea32676ff (include tanh graph)
+https://chatgpt.com/c/677acf8a-3ac4-8004-8af5-166ea32676ff (inclupdate_to_data_ratiose tanh graph)
 
 after regularize (add penalty) to paramters, greatly reduce saturated neuron
 W1 = torch.randn((n_embeddings * block_size, n_hidden), generator=g) * 0.01 # (30, 200)
@@ -500,7 +500,7 @@ class BatchNorm1d:
         # calcualte the forward pass
         if self.training:
             xmean = x.mean(0, keepdim=True) # batch mean
-            xvar = self.var(0, keepdim=True) # batch variance
+            xvar = x.var(0, keepdim=True) # batch variance
         else:
             xmean = self.running_mean
             xvar = self.running_var
@@ -535,17 +535,26 @@ g = torch.Generator().manual_seed(2147483647) # for reproducibility
 
 C = torch.randn((vocab_size, n_embd), generator=g)
 layers = [
-    Linear(n_embd * block_size, n_hidden), Tanh(),
-    Linear(n_hidden, n_hidden), Tanh(),
-    Linear(n_hidden, n_hidden), Tanh(),
-    Linear(n_hidden, n_hidden), Tanh(),
-    Linear(n_hidden, n_hidden), Tanh(),
-    Linear(n_hidden, vocab_size)
+    Linear(n_embd * block_size, n_hidden), BatchNorm1d(n_hidden), Tanh(),
+    Linear(n_hidden, n_hidden), BatchNorm1d(n_hidden), Tanh(),
+    Linear(n_hidden, n_hidden), BatchNorm1d(n_hidden), Tanh(),
+    Linear(n_hidden, n_hidden), BatchNorm1d(n_hidden), Tanh(),
+    Linear(n_hidden, n_hidden), BatchNorm1d(n_hidden), Tanh(),
+    Linear(n_hidden, vocab_size), BatchNorm1d(vocab_size)
 ]
+# layers = [
+#   Linear(n_embd * block_size, n_hidden), Tanh(),
+#   Linear(           n_hidden, n_hidden), Tanh(),
+#   Linear(           n_hidden, n_hidden), Tanh(),
+#   Linear(           n_hidden, n_hidden), Tanh(),
+#   Linear(           n_hidden, n_hidden), Tanh(),
+#   Linear(           n_hidden, vocab_size),
+# ]
 
 with torch.no_grad():
     #  last layer: make less confident
-    layers[-1].weight *= 0.1
+    layers[-1].gamma *= 0.1
+    # layers[-1].weight *= 0.1
     # all other layers: apply gain
     for layer in layers[:-1]:
         if isinstance(layer, Linear):
@@ -557,7 +566,7 @@ with torch.no_grad():
             keep the activation and gradients in a reasonable range 
             preventing them become too small (vanishing graidents) or too large (exploding graidents)
             '''
-            layer.weight *= 5/3 # 1
+            layer.weight *= 1.0 # *= 5/3 # 1.0
             '''
             interesting phenomenon: layer.weight *= 1 (not adjusting the initial weight)
             gradient distribtion becomes less centered and more spread out
@@ -589,7 +598,18 @@ for p in parameters:
 max_steps = 200000
 batch_size = 32
 track_loss = []
-ud = []
+'''
+the update-to-data ratio measures how significant the updates to the paramters are compared to their current values
+high ratio -> large updates and small ratio -> small updates
+
+by tracking this ratio, you can gain insights into the learning dynamics of the model 
+-> whether the mode is learning effectively or if the updates are too small to make meaningful progress
+
+if the ratio is consistently very low suggests gradients are vanishing -> ineffective learning
+
+so we can adjust the hyperparamters like learning rate 
+'''
+update_to_data_ratios = []
 
 for i in range(max_steps):
 
@@ -625,27 +645,41 @@ for i in range(max_steps):
     track_loss.append(loss.log10().item())
 
     with torch.no_grad():
-        ud.append([(lr*p.grad.std() / p.data.std()).log10().item() for p in parameters])
+        update_to_data_ratios.append([(lr*p.grad.std() / p.data.std()).log10().item() for p in parameters])
 
     if i >= 1000:
         break  
 # %%
 # visualize histograms
+'''
+Characteristics of a Good activation distribution:
+1. centered around zero (bell-shaped curve)
+2. moderate spread: avoid too many activatios near the extreme (-1 or 1 for tanh) -> prevent saturation
+'''
 plt.figure(figsize=(20,4)) # width and height of the plot
 legends = []
 for i, layer in enumerate(layers[:-1]): # note: exclude the output layer
     if isinstance(layer, Tanh):
         t = layer.out
-        print(f'layer {i} {layer.__class__.__name__:10s}: mean {t.mean():+.2f}, std {t.std():.2f}')
+        t_mean = f"{t.mean():+.2f}"
+        t_std = f"{t.std():.2f}"
+        t_abs_over_97_mean = (t.abs() > 0.97).float().mean() * 100
+        t_saturated = f"{t_abs_over_97_mean:.2f}%"
+        print(f'layer {i} {layer.__class__.__name__:10s}: mean {t_mean}, std {t_std} saturated: {t_saturated}')
         hy, hx = torch.histogram(t, density=True)
         plt.plot(hx[:-1].detach(), hy.detach())
         legends.append(f'later {i} ({layer.__class__.__name__})')
 plt.legend(legends)
-plt.title('gradient distribution')
+plt.title('Activation distribution')
 # %%
 '''
 remind a bit:
 graidients are used to adjust the model parameters (like weight and bias) to minizie the difference between the predicted values and the actual labels
+
+Positive Indicators:
+1. Centered Around Zero: Gradients centered around zero help ensure that updates to the model parameters are balanced, preventing any bias in the updates.
+2. Moderate Spread: The spread of the gradients is moderate, which helps in maintaining stable learning. This prevents issues like vanishing or exploding gradients.
+3. Consistent Across Layers: The consistency across different layers suggests that the network is learning effectively at each level.
 '''
 plt.figure(figsize=(20,4)) # width and height of the plot
 legends = []
@@ -675,8 +709,10 @@ plt.figure(figsize=(20,4))
 legends = []
 for i, p in enumerate(parameters):
     if p.ndim == 2:
-        plt.plot([ud[j][i] for j in range(len(ud))])
+        plt.plot([update_to_data_ratios
+    [j][i] for j in range(len(update_to_data_ratios
+    ))])
         legends.append(f'param {i}')
-plt.plot([0, len(ud)], [-3, -3], 'k') 
+plt.plot([0, len(update_to_data_ratios)], [-3, -3], 'k') 
 plt.legend(legends)
 # %%
