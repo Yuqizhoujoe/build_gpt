@@ -113,8 +113,79 @@ emb = emb_matrix[Xbatch] # embed the characters into vectors
 embcat = emb.view(emb.shape[0], -1) # concatenate the vectors 
 # linear layer 1
 hprebn = embcat @ W1 + b1 # hidden layer pre-activation
+
 # BatchNorm layer
-bnmeani = 1/batch_size * hprebn.sum(0, keepdim=True)
-bndiff = hprebn - bnmeani
+# --------------
+'''
+Batch Norm
+1. Compute the Mean:
+   - Calculate the mean of the batch for each feature.
+   - Formula: μ = (1/m) * Σ x_i
+   - This centers the data around zero.
+
+2. Compute the Variance:
+   - Calculate the variance of the batch for each feature.
+   - Formula: σ^2 = (1/m) * Σ (x_i - μ)^2
+   - This measures the spread of the data.
+
+3. Normalize:
+   - Subtract the mean and divide by the standard deviation.
+   - Formula: x̂_i = (x_i - μ) / sqrt(σ^2 + ε)
+   - This scales the data to have a mean of 0 and a variance of 1.
+   - ε is a small constant added for numerical stability.
+
+4. Scale and Shift:
+   - Apply a learned scale (γ) and shift (β) to the normalized data.
+   - Formula: y_i = γ * x̂_i + β
+   - This allows the network to undo the normalization if needed.
+
+hprebn.sum(0, keepdim=True) sum each column across all rows
+'''
+# compute the mean
+bnmeani = 1/batch_size * hprebn.sum(0, keepdim=True) 
+
+# compute the variance
+# 1e-5 is ε the small constant for numerical stability -> avoid numerator to be 0
+bndiff = hprebn - bnmeani 
 bndiff2 = bndiff**2
 bnvar = 1/(batch_size-1) * (bndiff2).sum(0, keepdim=True)
+bnvar_inv = (bnvar + 1e-5)**-0.5 # 1/sqrt(σ^2 + ε)
+
+bnraw = bndiff * bnvar_inv # (x_i - μ) / sqrt(σ^2 + ε)
+
+# scale and shift: y_i = γ * x̂_i + β
+hpreact = bngain * bnraw + bnbias
+# --------------
+
+# non-linearity
+# hidden layer
+h = torch.tanh(hpreact) 
+
+# linear layer 2
+logits = h @ W2 + b2 # output layer
+# cross entropy loss
+''' 
+For numericall stability
+the maximum value in each row of logits is subtracted from every element in that row
+prevents large exponentials in the next step
+'''
+logit_maxes = logits.max(1, keepdim=True).values
+norm_logits = logits - logit_maxes # subtract max for numerial stability
+counts = norm_logits.exp()
+counts_sum = counts.sum(1, keepdim=True)
+# if use (1.0 / counts_sum) instead then can't get backprop to be bit exact
+counts_sum_inv = counts_sum**-1 
+probs = counts * counts_sum_inv
+logprobs = probs.log()
+loss = logprobs[range(batch_size), Ybatch].mean()
+
+# backward pass
+for p in parameters:
+    p.grad = None
+for t in [logprobs, probs, counts, counts_sum, counts_sum_inv,
+          norm_logits, logit_maxes, logits, h, hpreact, bnraw, 
+          bnvar_inv, bnvar, bndiff2, bndiff, hprebn, bnmeani,
+          embcat, emb]:
+    t.retain_grad()
+loss.backward()
+loss
