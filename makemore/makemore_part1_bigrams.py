@@ -44,6 +44,7 @@ for word in words:
 bigram_dict.items()
 # %%
 sorted(bigram_dict.items(), key=lambda x: x[1], reverse=True)
+
 # %%
 import torch
 # %%
@@ -114,7 +115,7 @@ print("Sampled indices:", sampled_indices.tolist())
 # In this example, index 0 should appear more frequently in the output.
 
 '''
-
+import torch
 # seed is like the key
 # the same seed will always generate the same random numbers -> reproducibility
 # different seeds will generate different random numbers -> randomness
@@ -231,7 +232,6 @@ log(a*b*c) = log(a) + log(b) + log(c)
 
 so we can add up the log probabilities instead of multiplying the probabilities
 '''
-
 # %%      
 def get_normalized_neg_log_likelihood(words):
       log_likelihood = 0.0
@@ -255,7 +255,7 @@ print(f"nll: {nll:.4f}")
 '''
 Maximum Likelihood Estimation
 
-maximize lieklihood of the data w.r.t. the model parameters
+maximize likelihood of the data w.r.t. the model parameters
 equivalent to maximizing the log likelihood (because log is monotonic)
 equivalent to minimizing the negative log likelihood
 equivalent to minimizing the average negative log likelihood
@@ -270,6 +270,7 @@ for word in words[:1]:
       for char1, char2 in zip(chars, chars[1:]):
             index1 = charToIndex[char1]
             index2 = charToIndex[char2]
+            print(f"input: {char1}, output: {char2}")
             xs.append(index1)
             ys.append(index2)
             
@@ -323,19 +324,128 @@ xs_hot_encoded: 5x27 matrix
 
 the dot product of xs_hot_encoded and weights_matrix is a 5x27 matrix
 '''
-weights_matrix = torch.randn((27,27))
+g = torch.Generator().manual_seed(2147483647 + 1)
+weights_matrix = torch.randn((27,27), generator=g)
 weights_matrix
-# %%
-xs_hot_encoded
+
 # %%
 '''
 (5, 27) @ (27, 27) = (5, 27)
+each neuron = x1 * weight1 + x2 * weight2 + ... + x5 * weight5
+x1 -> a row vector of 27 elements [1, 0, 0, ..., 0]
+weight1 -> a column vector of 27 elements [w11, w12, ..., w1n]
+x1 * weight1 = 1 * w11 + 0 * w12 + ... + 0 * w1n = w11
 '''
+xs_weights = (xs_hot_encoded @ weights_matrix)
+xs_weights
+# %%
+xs_weights[3,13] # (xs_hot_encoded[3] * weights_matrix[:,13]).sum()
+
+# %%
 logits = xs_hot_encoded @ weights_matrix # log counts
+# softmax
 counts = logits.exp() # equivalent to N
 probs = counts / counts.sum(1, keepdim=True) # normalize the counts
-# %%
-probs[0].shape
-# %%
+'''
+xs: [0, 5, 13, 13, 1]
+probs[0] is the probabilities of 27 elements 
+and highest probability is the next character of xs[0] -> '.'
+'''
 probs[0]
+# %%
+nlls = torch.zeros(5)
+for i in range(5):
+      # i-th bigram
+      x = xs_tensor[i].item() # input character index
+      y = ys_tensor[i].item() # output character index
+      print('-----------')
+      print(f"bigram example {i+1}: {indexToChar[x]}{indexToChar[y]} (indexes {x},{y})")
+      print('input to the neural net: ', x)
+      print('output probabilities from the neural net: ', probs[i])
+      print('label (actual next character): ', y)
+      p = probs[i,y]
+      print('probaility assigned by the net to the correct character: ', p.item())
+      logp = torch.log(p)
+      print('log likelihood: ', logp.item())
+      nll = -logp
+      print('negative log likelihood: ', nll.item())
+      nlls[i] = nll
+
+print("=========")
+print('average negative log likelihood, i.e. loss = ', nlls.mean().item())
+
+# %%
+# ----------- 1st OPTIMIZATION !!! ----------------
+# %%
+xs_tensor
+# %% 
+ys_tensor
+
+# %%
+g = torch.Generator().manual_seed(2147483647)
+W = torch.randn((27, 27), generator=g, requires_grad=True)
+
+# %%
+# Forward pass
+xenc = F.one_hot(xs_tensor, num_classes=27).float() # input to network: one-hot encoding
+logits = xenc @ W # prefict log-counts
+counts = logits.exp() # counts
+probs = counts / counts.sum(1, keepdim=True) # probabilities for next character
+# %%
+(probs[0,5], probs[1, 13], probs[2,13], probs[3,1], probs[4,0])
+# %%
+torch.arange(5)
+
+# %%
+loss = -probs[torch.arange(5), ys].log().mean()
+loss
+ # %%
+# backward pass
+W.grad = None # set to zero the gradient
+loss.backward()
+
+# %%
+W.data += 0.1 * W.grad
+
+# %%
+# --------- !!!! 2nd OPTIMIZATION !!! yay ------------
+xs, ys = [], []
+for w in words:
+      chs = ['.'] + list(w) + ['.']
+      for ch1, ch2 in zip(chs, chs[1:]):
+            ix1 = charToIndex[ch1]
+            ix2 = charToIndex[ch2]
+            xs.append(ix1)
+            ys.append(ix2)
+xs = torch.tensor(xs)
+ys = torch.tensor(ys)
+num = xs.nelement()
+print('number of examples: ', num)
+
+# Initialize the network
+g = torch.Generator().manual_seed(2147483647)
+W = torch.randn((27, 27), generator=g, requires_grad=True)
+# %%
+# gradient descent
+for k in range(10):
+
+      # forward pass
+      xenc = F.one_hot(xs, num_classes=27).float()
+      logits = xenc @ W # predict log-counts
+      counts = logits.exp() # counts
+      probs = counts / counts.sum(1, keepdim=True) # probabilities for next character
+      # 0.01 * (W**2).mean() -> regulation
+      loss = -probs[torch.arange(num), ys].log().mean() + 0.01 * (W**2).mean()
+      print(loss.item())
+
+      # backward pass
+      W.grad = None
+      loss.backward()
+
+      # update 
+      # 50 is the learning rate
+      W.data += -50 * W.grad 
+
+# %%
+0.01 * (W**2).mean()
 # %%
