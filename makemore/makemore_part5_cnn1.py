@@ -89,6 +89,15 @@ class BatchNorm1d:
     def __call__(self, x):
         # calculate the forward pass
         if self.training:
+            '''
+            e = torch.randn(32,4,68)
+            # emean = e.mean(0, keepdim=True) # (1,4,68)
+            emean = e.mean((0,1), keepdim=True) # (1,1,68)
+            # evar = e.var(0, keepdim=True) # (1,4,68)
+            evar = e.var((0,1), keepdim=True) # (1,1,68)
+            ehat = (e - emean) / torch.sqrt(evar + 1e-5) # (32,4,68)
+            ehat.shape
+            '''
             if x.ndim == 2:
                 dim = 0
             elif x.ndim == 3:
@@ -264,12 +273,60 @@ def split_loss(split):
     
 split_loss('train')
 split_loss('val')
+
+# %% [markdown]
+### performance log
+'''
+- original (3 character context + 200 hidden neurons, 12K params): train 2.058, val 2.105
+- context: 3 -> 8 (22K params): train 1.918, val 2.027
+- flat -> hierarchical (22K params): train 1.941, val 2.029
+- fix bug in batchnorm: train 1.912, val 2.022
+- scale up the network: n_embd 24, n_hidden 128 (76K params): train 1.769, val 1.993
+'''
 # %%
-e = torch.randn(32,4,68)
-# emean = e.mean(0, keepdim=True) # (1,4,68)
-emean = e.mean((0,1), keepdim=True) # (1,1,68)
-# evar = e.var(0, keepdim=True) # (1,4,68)
-evar = e.var((0,1), keepdim=True) # (1,1,68)
-ehat = (e - emean) / torch.sqrt(evar + 1e-5) # (32,4,68)
-ehat.shape
+# sample from the model
+
+for _ in range(20):
+    # Initialize an empty list to store the generated indices
+    out = []
+    # Start with a context of zeros, which is the initial input to the model
+    context = [0] * block_size 
+    
+    while True:
+        # Forward pass the neural net with the current context
+        logits = model(torch.tensor([context]))
+        
+        # Convert logits to probabilities using softmax
+        probs = F.softmax(logits, dim=1)
+        
+        # Sample an index from the probability distribution
+        index = torch.multinomial(probs, num_samples=1).item()
+        
+        # Shift the context window and track the samples
+        context = context[1:] + [index]
+        
+        # Append the sampled index to the output list
+        out.append(index)
+        
+        # If we sample the special '.' token, break the loop
+        if index == 0:
+            break
+    
+    # Decode the generated indices into characters and print the generated word
+    generated_word = ''.join(itos[i] for i in out)
+# %%
+for x,y in zip(Xtrain[7:15], Ytrain[7:15]):
+    print(''.join(itos[idx.item()] for idx in x), '-->', itos[y.item()])
+# %%
+# forward a single example:
+logits = model(Xtrain[[7]])
+logits.shape
+# %%
+# forward all of them
+logits = torch.zeros(8, 27)
+for i in range(8):
+  logits[i] = model(Xtrain[[7+i]])
+  print(logits[i])
+  print(Xtrain[[7+i]])
+logits.shape
 # %%

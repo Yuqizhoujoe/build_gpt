@@ -1,5 +1,7 @@
 # WaveNet & deep convolutional neural network (CNN)
 
+> WaveNet Model paper: https://arxiv.org/pdf/1609.03499 >
+
 ## Step Flattening
 
 ```
@@ -54,3 +56,62 @@ Reasons for Step-by-Step Flattening
 5. Improved Gradient Flow:
 
 - Intermediate layers can help in maintaining a good gradient flow during backpropagation, which is crucial for training deep networks effectively.
+
+## Normalization
+
+### BatchNorm mean and variance
+
+```
+if x.ndim == 2:
+    dim = 0
+elif x.ndim == 3:
+    dim = (0,1)
+xmean = x.mean(dim, keepdim=True)
+xvar = x.var(dim, keepdim=True)
+```
+
+**2D Tensor (`x.ndim == 2`)**
+
+- shape: (batch_size, features)
+- Normalization Across `dim = 0`:
+  - calculate the mean and variance for each feature across alll examples in the batch
+
+**3D Tensor (`x.ndim == 3`)**
+
+- shape: (batch_size, sequence_length, features)
+- Normalization across `dim = (0,1)`
+  - calculate the mean and variance for each feature across all examplels in the batch and all time steps in the sequence
+  - This is common in sequence models (e.g., RNNs, CNNs for sequences): you want to treat each feature consistently across different time steps and examples
+
+**Why Normalize Across dim(0) and dim(0,1)?**
+
+- Consistency across time and batch
+- Stability and Efficiency -> reduce internal covariate shift -> faster convergence and potential better performance
+
+> **Time Steps**
+>
+> - Time Steps refer to the individual points in time within a sequence of data. In the context of sequence data, each time step represents a single observation or measurement.
+> - For example, if you have a sequence of daily temperatures over a week, each day's temperature is a time step. In a sequence of audio data, each sample in the audio signal can be considered a time step.
+
+## Sampling, Probability Distribution, & Logits
+
+### Probability Distribution
+
+```
+probs = F.softmax(logits, dim=1)
+```
+
+**Why dim=1?**
+
+- the `logits` tensor shape (batch_size, num_classes). Each row corresponds to the raw scores (logits) for each class (or character) for a single example in the batch
+
+- the softmax function converts these raw scores into probabilities. By specifying `dim=1`, the softmax is applied across the columns of each row, meaning it normalizses the logits for each example in the batch -> ensures the probabilities for each example sum to 1
+
+### Multinomial
+
+```
+index = torch.multinomial(probs, num_samples=1).item()
+```
+
+- sample indices from the probability distribution
+  - in the context, it selects the next character index based on the probabilities calculated from the softmax of the logits
