@@ -1,0 +1,24 @@
+[project]
+name = "build-gpt"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.1.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = ["E501", "B018"]  # line too long, unused expressions (for docstrings in markdown cells)
+# Note: Ruff automatically supports .ipynb files (no configuration needed)
+
+[tool.pyright]
+reportUnusedExpression = "none"  # Allow docstrings in markdown cells
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.3",
+]

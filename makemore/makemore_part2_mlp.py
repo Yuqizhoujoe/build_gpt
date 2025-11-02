@@ -1,21 +1,22 @@
 # %% [markdown]
 ## makemore part 2
-# %% 
+# %%
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
+
 # %matplotlib inline
 # %%
-words = open("names.txt", 'r').read().splitlines()
+words = open("names.txt", "r").read().splitlines()
 # %%
-chars = sorted(list(set(''.join(words))))
-ctoi = {s:i+1 for i, s in enumerate(chars)}
-ctoi['.'] = 0
-itoc = {i:s for s,i in ctoi.items()}
+chars = sorted(list(set("".join(words))))
+ctoi = {s: i + 1 for i, s in enumerate(chars)}
+ctoi["."] = 0
+itoc = {i: s for s, i in ctoi.items()}
 # %%
 ctoi
 # %%
-block_size = 3 # how many characters do we take to predict the next one?
+block_size = 3  # how many characters do we take to predict the next one?
 X, Y = [], []
 
 for w in words[:10]:
@@ -23,13 +24,13 @@ for w in words[:10]:
     context = [0] * block_size
     for ch in w + ".":
         idx = ctoi[ch]
-        print(f'index: {idx}')
-        print(f'context: {[itoc[c] for c in context]} -> char: {ch}')
+        print(f"index: {idx}")
+        print(f"context: {[itoc[c] for c in context]} -> char: {ch}")
         X.append(context)
         Y.append(idx)
-        context = context[1:] + [idx] # remove the first one and append
+        context = context[1:] + [idx]  # remove the first one and append
 
-    print('')
+    print("")
 
 X = torch.tensor(X)
 Y = torch.tensor(Y)
@@ -40,7 +41,7 @@ X
 Y.shape
 Y
 # %%
-'''
+"""
 why use embeddings?
 [0,0,5] ..e
 discrete representations -> one-hot encoding for these indices
@@ -69,12 +70,12 @@ Advatnage using Embeddings:
 Example:
 One-Hot Vector: [0, 0, 0, 0, 0, 1, 0, ..., 0] (27-dimensional)
 Embedding Vector: [0.12, -0.56, ..., 0.34] (10-dimensional)
-'''
+"""
 # 27 unique characters & 2 embedding dimensions
-embedding_matrix = torch.randn((27,2)) 
-embedding_matrix 
+embedding_matrix = torch.randn((27, 2))
+embedding_matrix
 # %%
-'''
+"""
 Embedding Matrix (27,2):
  tensor([[ 0.1234, -0.5678],
          [ 0.2345,  0.6789],
@@ -110,14 +111,14 @@ Indexing for each sequence (32, 3, 2):
           [-0.2345,  0.3456],
           [-0.2345,  0.3456]]])
 
-'''
+"""
 # indexing
 embedding_matrix_indexing = embedding_matrix[X]
-print(f'X.shape {X.shape}')
-print(f'embedding_matrix.shape {embedding_matrix.shape}')
-print(f'embeddings.shape {embedding_matrix_indexing.shape}')
+print(f"X.shape {X.shape}")
+print(f"embedding_matrix.shape {embedding_matrix.shape}")
+print(f"embeddings.shape {embedding_matrix_indexing.shape}")
 # %%
-'''
+"""
 Embedding Matrix (27, 2):
  tensor([[ 0.1234, -0.5678],
          [ 0.2345,  0.6789],
@@ -163,47 +164,51 @@ Embeddings (32, 6): 32 sequences each with 6 indices
          [ 0.1234, -0.5678,  0.6789,  0.1234,  1.4567,  0.9012],
          [ 0.6789,  0.1234,  1.4567,  0.9012,  1.4567,  0.9012]])
 
-''' 
-embeddings = embedding_matrix_indexing.view(embedding_matrix_indexing.shape[0], 6) # (32, 6)
+"""
+embeddings = embedding_matrix_indexing.view(
+    embedding_matrix_indexing.shape[0], 6
+)  # (32, 6)
 # %%
-W1 = torch.randn((6,100))
+W1 = torch.randn((6, 100))
 b1 = torch.randn(100)
 # %%
 # torch.cat([emb[:, 0, :], emb[:,1,:], emb[:,2,:]], 1).shape
 # torch.cat(torch.unbind(embeddings, 1), 1).shape
 # embeddings.view(32, 6) == torch.cat(torch.unbind(embeddings, 1), 1)
-# embeddings.storage() 
+# embeddings.storage()
 
 # %%
-hidden_layer = torch.tanh(embeddings.view(embeddings.shape[0], 6) @ W1 + b1) # (32, 100)
+hidden_layer = torch.tanh(
+    embeddings.view(embeddings.shape[0], 6) @ W1 + b1
+)  # (32, 100)
 hidden_layer
 # %%
-hidden_layer.shape # (32,100)
+hidden_layer.shape  # (32,100)
 # %%
 W2 = torch.randn((100, 27))
 b2 = torch.randn(27)
 # %%
-logits = hidden_layer @ W2 + b2 
+logits = hidden_layer @ W2 + b2
 # %%
 logits.shape
 # %%
 # softmax
-counts = logits.exp() 
+counts = logits.exp()
 counts
 # %%
 prob = counts / counts.sum(1, keepdim=True)
 prob
-# %% 
+# %%
 prob.shape
 # %%
 # loss
 loss = prob[torch.arange(32), Y].log().mean()
 loss
 # %%
-X.shape, Y.shape # X.shape: (32,3) Y.shape: (32)
+X.shape, Y.shape  # X.shape: (32,3) Y.shape: (32)
 # %%
 g = torch.Generator().manual_seed(2147483647)
-embedding_matrix = torch.rand((27,2), generator=g)
+embedding_matrix = torch.rand((27, 2), generator=g)
 W1 = torch.randn(6, 100, generator=g)
 b1 = torch.randn(100, generator=g)
 W2 = torch.randn(100, 27, generator=g)
@@ -214,7 +219,7 @@ for p in parameters:
 # %%
 sum(p.nelement() for p in parameters)
 # %%
-'''
+"""
 Embedding Matrix (27,2):
  tensor([[ 0.1234, -0.5678],
          [ 0.2345,  0.6789],
@@ -265,10 +270,10 @@ Embeddings (32, 6): 32 sequences each with 6 indices
 
 (32, 6) * (6, 100) + (100) -> (32, 100)
 (32, 100) * (100, 27) + (27) -> (32, 27)
-'''
+"""
 
 learning_rate_powers = torch.linspace(-3, 0, 1000)
-learning_rates = 10 ** learning_rate_powers
+learning_rates = 10**learning_rate_powers
 
 track_learning_rate = []
 track_loss = []
@@ -278,10 +283,10 @@ for i in range(1000):
     idx = torch.randint(0, X.shape[0], (32,))
 
     # Forward pass
-    embedding_matrix_indexing = embedding_matrix[X[idx]] # (32, 3, 2) 
+    embedding_matrix_indexing = embedding_matrix[X[idx]]  # (32, 3, 2)
     embeddings = embedding_matrix_indexing.view(embedding_matrix_indexing.shape[0], 6)
-    hidden_layer = torch.tanh(embeddings @ W1 + b1) # (32, 100)
-    logits = hidden_layer @ W2 + b2 # (32, 27)
+    hidden_layer = torch.tanh(embeddings @ W1 + b1)  # (32, 100)
+    logits = hidden_layer @ W2 + b2  # (32, 27)
     # counts = logits.exp()
     # probs = counts / counts.sum(dim=1, keepdim=True)
     # loss = -prob[torch.arange(32), Y].log().mean()
@@ -304,35 +309,35 @@ for i in range(1000):
     track_learning_rate.append(learning_rate_powers[i])
     track_loss.append(loss.item())
 # %%
-'''
+"""
 find out the good learning rate is around 0.1
-'''
+"""
 plt.plot(track_learning_rate, track_loss)
 # %%
-'''
+"""
 use the good learning rate 0.1 to train
-'''
+"""
 for _ in range(10000):
     # get random 32 indices from input -> indices[]
     indices = torch.randint(0, X.shape[0], (32,))
 
     # forward pass
-    embedding_matrix_indexing = embedding_matrix[X[indices]] # (32,3,2)
+    embedding_matrix_indexing = embedding_matrix[X[indices]]  # (32,3,2)
     # flatten (32,3,2) to (32,6)
     embeddings = embedding_matrix_indexing.view(embedding_matrix_indexing.shape[0], 6)
     # W1: (6,100); b1 (100)
     # hidden layer: (32, 100)
-    hidden_layer = torch.tanh(embeddings @ W1 + b1) 
+    hidden_layer = torch.tanh(embeddings @ W1 + b1)
     # W2: (100, 27); b2 (27)
     # output layer: (32, 27)
     logits = hidden_layer @ W2 + b2
-    # Y[indices] -> 32 output 
+    # Y[indices] -> 32 output
     loss = F.cross_entropy(logits, Y[indices])
 
     # backward pass
     for p in parameters:
         p.grad = None
-    
+
     loss.backward()
 
     # update
@@ -347,9 +352,12 @@ print(loss.item())
 # training split, dev/validation split, test split
 # 80%, 10%, 10%
 
+
 # build the dataset
 def build_dataset(words):
-    block_size = 3 # context length: how many characters do we take to predict the next one?
+    block_size = (
+        3  # context length: how many characters do we take to predict the next one?
+    )
     X, Y = [], []
 
     for w in words:
@@ -359,13 +367,15 @@ def build_dataset(words):
             X.append(context)
             Y.append(idx)
             context = context[1:] + [idx]
-    
+
     X = torch.tensor(X)
     Y = torch.tensor(Y)
     print(X.shape, Y.shape)
     return X, Y
 
+
 import random
+
 random.seed(42)
 random.shuffle(words)
 
@@ -377,8 +387,8 @@ Xdev, Ydev = build_dataset(words[n1:n2])
 Xtest, Ytest = build_dataset(words[n2])
 # %%
 g = torch.Generator().manual_seed(2147483647)
-embedding_matrix = torch.randn((27,2))
-W1 = torch.randn((6,300), generator=g)
+embedding_matrix = torch.randn((27, 2))
+W1 = torch.randn((6, 300), generator=g)
 b1 = torch.randn(300, generator=g)
 W2 = torch.randn((300, 27), generator=g)
 b2 = torch.randn(27, generator=g)
@@ -417,14 +427,14 @@ for i in range(10000):
     learning_rate = 0.1
     for p in parameters:
         p.data += -learning_rate * p.grad
-    
+
     # track stats
     track_steps.append(i)
     track_loss.append(loss.item())
 # %%
 plt.plot(track_steps, track_loss)
 # %%
-'''
+"""
 Next question: overfitting & underfitting
 https://chatgpt.com/c/67793978-2c4c-8004-b3d2-c83f34e4a4f9
-'''
+"""
